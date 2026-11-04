@@ -1,0 +1,97 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # publish releases on tags
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: macos-universal
+            runner: macos-latest
+          - platform: linux-x64
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-universal' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+      - name: Tests
+        if: runner.os == 'Linux'
+        run: cargo test --release
+      - name: Bundle
+        run: |
+          if [ "${{ matrix.platform }}" = macos-universal ]; then
+            cargo xtask bundle-universal persona --release
+            codesign --force --deep -s - target/bundled/Persona.vst3
+            codesign --force --deep -s - target/bundled/Persona.clap
+          else
+            cargo xtask bundle persona --release
+          fi
+      - name: Render check (every style through the CLAP state path; latency, tuning, tempo sync, state)
+        if: runner.os == 'Linux'
+        run: cargo run -p render --release -- target/bundled/Persona.clap target/renders
+      - name: Zip
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          name="Persona-${version}-${{ matrix.platform }}.zip"
+          mkdir -p dist
+          cd target/bundled
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip "../../dist/$name" Persona.vst3 Persona.clap
+          else
+            zip -qry "../../dist/$name" Persona.vst3 Persona.clap
+          fi
+          ls -la ../../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          notes="docs/release-notes/${tag}.md"
+          gh release create "$tag" dist/* --title "Persona ${tag}" --notes-file "$notes" --verify-tag
