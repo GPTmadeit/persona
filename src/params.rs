@@ -136,7 +136,7 @@ impl Room {
     }
 }
 
-fn db(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
+pub(crate) fn db(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Linear { min, max })
         .with_unit(" dB")
         .with_step_size(0.1)
@@ -144,13 +144,13 @@ fn db(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
         .with_smoother(SmoothingStyle::Linear(30.0))
 }
 
-fn hz(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
+pub(crate) fn hz(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Skewed { min, max, factor: FloatRange::skew_factor(-1.6) })
         .with_value_to_string(formatters::v2s_f32_hz_then_khz(1))
         .with_string_to_value(formatters::s2v_f32_hz_then_khz())
 }
 
-fn pct(name: &str, default: f32) -> FloatParam {
+pub(crate) fn pct(name: &str, default: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Linear { min: 0.0, max: 1.0 })
         .with_unit("%")
         .with_value_to_string(formatters::v2s_f32_percentage(0))
@@ -158,7 +158,7 @@ fn pct(name: &str, default: f32) -> FloatParam {
         .with_smoother(SmoothingStyle::Linear(30.0))
 }
 
-fn ms(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
+pub(crate) fn ms(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Skewed { min, max, factor: FloatRange::skew_factor(-1.8) })
         .with_unit(" ms")
         .with_value_to_string(formatters::v2s_f32_rounded(1))

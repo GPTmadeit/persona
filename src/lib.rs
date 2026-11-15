@@ -5,12 +5,14 @@ use std::sync::Arc;
 pub mod chain;
 pub mod dsp;
 pub mod editor;
+pub mod master;
 pub mod params;
 pub mod profile;
 pub mod shared;
 pub mod styles;
 #[doc(hidden)]
 pub mod testsignal;
+pub(crate) mod ui;
 pub mod update;
 
 use chain::{Chain, Settings};
@@ -155,5 +157,7 @@ impl Vst3Plugin for Persona {
         &[Vst3SubCategory::Fx, Vst3SubCategory::PitchShift, Vst3SubCategory::Dynamics, Vst3SubCategory::Reverb];
 }
 
-nih_export_clap!(Persona);
-nih_export_vst3!(Persona);
+use master::PersonaMaster;
+
+nih_export_clap!(Persona, PersonaMaster);
+nih_export_vst3!(Persona, PersonaMaster);

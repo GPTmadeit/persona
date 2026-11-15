@@ -38,7 +38,9 @@ fn halfband() -> [f32; TAPS] {
     h
 }
 
-struct Oversampler {
+/// 2x oversampling around a nonlinearity, with a 31-tap half-band each way (15 samples of
+/// delay at the base rate in all).
+pub struct Oversampler {
     h: [f32; TAPS],
     up: [f32; TAPS],
     down: [f32; TAPS],
@@ -47,11 +49,11 @@ struct Oversampler {
 }
 
 impl Oversampler {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { h: halfband(), up: [0.0; TAPS], down: [0.0; TAPS], up_pos: 0, down_pos: 0 }
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.up = [0.0; TAPS];
         self.down = [0.0; TAPS];
     }
@@ -67,7 +69,7 @@ impl Oversampler {
 
     /// One input sample to two at the doubled rate (zero-stuffed, gain 2, filtered).
     #[inline]
-    fn upsample(&mut self, x: f32) -> [f32; 2] {
+    pub fn upsample(&mut self, x: f32) -> [f32; 2] {
         let mut out = [0.0; 2];
         for (j, v) in [x * 2.0, 0.0].into_iter().enumerate() {
             self.up_pos = (self.up_pos + TAPS - 1) % TAPS;
@@ -79,12 +81,14 @@ impl Oversampler {
 
     /// Two doubled-rate samples back to one.
     #[inline]
-    fn downsample(&mut self, y: [f32; 2]) -> f32 {
+    pub fn downsample(&mut self, y: [f32; 2]) -> f32 {
         let mut out = 0.0;
         for (j, v) in y.into_iter().enumerate() {
             self.down_pos = (self.down_pos + TAPS - 1) % TAPS;
             self.down[self.down_pos] = v;
-            if j == 1 {
+            // Taken on the first of the pair: the two filters then add up to a whole number of
+            // samples (15), so the result lines up with a dry copy.
+            if j == 0 {
                 out = Self::fir(&self.h, &self.down, self.down_pos);
             }
         }

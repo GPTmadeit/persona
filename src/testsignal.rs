@@ -48,3 +48,62 @@ pub fn vocal(fs: f32, seconds: f32) -> Vec<f32> {
     }
     out
 }
+
+/// A synthetic stereo mix for the mastering tests: a kick on every beat at 120 BPM, a sub bass
+/// line, a chord pad that leans left and right, hats and the test vocal in the middle. It has
+/// what a real mix has that matters here: sharp transients over sustained material, most of
+/// the energy at the bottom, a top end that rolls off, and some stereo. About -20 LUFS with
+/// peaks around -6 dBFS.
+pub fn mix(fs: f32, seconds: f32) -> (Vec<f32>, Vec<f32>) {
+    let n = (fs * seconds) as usize;
+    let voice = vocal(fs, seconds);
+    let mut seed = 0x51ED_270Bu32;
+    let mut noise = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+    };
+    let bass_notes = [45.0f32, 45.0, 48.0, 43.0];
+    let chord = [57.0f32, 60.0, 64.0, 67.0];
+    let hz_of = |m: f32| 440.0 * 2f32.powf((m - 69.0) / 12.0);
+    let (mut left, mut right) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let (mut hat_l, mut hat_r) = (0.0f32, 0.0f32);
+    let mut kick_phase = 0.0f32;
+    let mut bass_phase = 0.0f32;
+    for i in 0..n {
+        let t = i as f32 / fs;
+        let beat = t * 2.0;
+        let in_beat = beat.fract();
+        // Kick: a sine dropping from 150 to 50 Hz, with a click on the front.
+        let kick_hz = 50.0 + 100.0 * (-in_beat * 30.0).exp();
+        kick_phase = (kick_phase + kick_hz / fs).fract();
+        if in_beat < 1.0 / fs * 2.0 {
+            kick_phase = 0.0;
+        }
+        let kick = (TAU * kick_phase).sin() * (-in_beat * 7.0).exp() * 0.5 + (-in_beat * 900.0).exp() * 0.25;
+        // Sub bass, ducking under the kick the way a sidechained 808 does.
+        let bass_hz = hz_of(bass_notes[(beat / 4.0) as usize % bass_notes.len()] - 12.0);
+        bass_phase = (bass_phase + bass_hz / fs).fract();
+        let bass = ((TAU * bass_phase).sin() + 0.3 * (TAU * 2.0 * bass_phase).sin()) * 0.22 * (0.35 + 0.65 * (in_beat * 3.0).min(1.0));
+        // Pad: four notes, each a slightly different level left and right.
+        let (mut pad_l, mut pad_r) = (0.0, 0.0);
+        for (k, m) in chord.iter().enumerate() {
+            let hz = hz_of(*m);
+            let v = (TAU * hz * t).sin() + 0.4 * (TAU * 2.0 * hz * t + 0.6).sin() + 0.2 * (TAU * 3.0 * hz * t + 1.1).sin();
+            let pan = [0.25f32, 0.75, 0.4, 0.6][k];
+            pad_l += v * (1.0 - pan);
+            pad_r += v * pan;
+        }
+        // Hats on the off-beats: differentiated noise, different on each side.
+        let hat_env = if in_beat >= 0.5 { (-(in_beat - 0.5) * 45.0).exp() } else { 0.0 };
+        let (a, b) = (noise(), noise());
+        let (hl, hr) = (a - hat_l, b - hat_r);
+        hat_l = a;
+        hat_r = b;
+        let centre = kick + bass + voice[i] * 0.55;
+        left.push(centre + pad_l * 0.035 + hl * 0.05 * hat_env);
+        right.push(centre + pad_r * 0.035 + hr * 0.05 * hat_env);
+    }
+    (left, right)
+}
