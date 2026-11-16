@@ -1,10 +1,10 @@
 [package]
 name = "persona"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["GPTmadeit"]
 license = "GPL-3.0-or-later"
-description = "Rap vocal chains in the style of your favorite artists (VST3 + CLAP)"
+description = "Persona: rap vocal chains in the style of your favorite artists, and Persona Master, a mastering chain (VST3 + CLAP)"
 repository = "https://github.com/GPTmadeit/persona"
 
 [workspace]

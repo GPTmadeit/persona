@@ -823,7 +823,7 @@ fn header_bar(ui: &mut Ui, st: &mut EditorState) {
 
     let badge = Rect::from_min_max(pos2(right - 190.0, r.center().y - 14.0), pos2(right, r.center().y + 14.0));
     let mut b_ui = ui.new_child(egui::UiBuilder::new().max_rect(badge).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    update_badge(&mut b_ui, st);
+    update_badge(&mut b_ui, &st.update);
     right -= 200.0;
 
     let meter = |p: &Painter, x0: f32, label: &str, vals: &[f32]| {
@@ -858,8 +858,8 @@ fn header_bar(ui: &mut Ui, st: &mut EditorState) {
     p.text(pos2(right - 330.0, r.center().y), Align2::RIGHT_CENTER, format!("{latency:.0} ms"), regular(11.0), FAINT);
 }
 
-fn update_badge(ui: &mut Ui, st: &mut EditorState) {
-    let status = st.update.lock().clone();
+pub(crate) fn update_badge(ui: &mut Ui, update: &SharedStatus) {
+    let status = update.lock().clone();
     let pill = |ui: &mut Ui, text: String, color: Color32| {
         ui.label(egui::RichText::new(text).font(semi(11.5)).color(color));
     };
@@ -870,7 +870,7 @@ fn update_badge(ui: &mut Ui, st: &mut EditorState) {
                 r = r.on_hover_text(notes);
             }
             if r.clicked() {
-                update::spawn_install(st.update.clone());
+                update::spawn_install(update.clone());
             }
         }
         Status::Installing { version } => {

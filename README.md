@@ -1,6 +1,14 @@
 # Persona
 
-A vocal plugin (VST3 + CLAP) for rap: pick an artist's style and Persona sets up the whole vocal
+Two plugins in one download (VST3 + CLAP):
+
+- **Persona**, a vocal chain for rap: pick an artist's style and it sets up the whole chain.
+- **Persona Master**, a mastering chain for the finished song, with an Auto Master that sets it
+  up from the mix it hears. [Jump to it](#persona-master).
+
+## Persona (vocals)
+
+A vocal plugin for rap: pick an artist's style and Persona sets up the whole vocal
 chain to sound like their records. Tune, clean-up EQ, de-esser, two compressors, saturation, tone,
 doubler, delay and reverb, all in one window, all editable.
 
@@ -74,9 +82,43 @@ not by their volume.
 
 ![Reverb](docs/space.png)
 
+## Persona Master
+
+![Persona Master](docs/master.png)
+
+Put it last on the master channel. It does the job of a mastering suite in one window:
+
+- **Auto Master**: pick a genre and a loudness target (Stream -14, Loud -10, Club -8 LUFS), play
+  the loudest part of the song and press *Listen*. In about 12 seconds it measures loudness,
+  true peak, tonal balance in eight bands, how hard the loud moments hit in each band, and the
+  stereo width. Then it sets the Balance EQ, the compressors, the imager and the maximizer, and
+  listens again to land the loudness on your target. It tells you what it did, and *Undo* puts
+  everything back.
+- **EQ**: six bands you drag on the analyser. Each can work on the whole mix, the middle or the
+  sides. The filters follow analog curves all the way to 20 kHz instead of bunching up near the
+  top the way textbook digital EQ does.
+- **Balance**: the broad eight-band tonal correction Auto Master sets, with one Amount knob.
+- **Glue**: bus compressor with programme-dependent release, side-chain low cut and parallel mix.
+- **Dynamics, Exciter, Imager**: four bands split by phase-matched crossovers. Compression per
+  band, tube / tape / crisp harmonics (oversampled) per band, stereo width per band, mono bass.
+- **Maximizer**: an oversampled soft clipper for the drum peaks, then a lookahead limiter that
+  watches true (between-sample) peaks, so the ceiling holds on streaming services.
+- **Meters**: integrated, short-term and momentary loudness and loudness range to ITU-R BS.1770-4
+  / EBU R128, true peak, limiting over time, vectorscope and phase correlation. The analyser
+  shows your mix, the master, and a band where the chosen genre usually sits.
+- **Bypass and Gain match**: Bypass plays the mix in time with the master. Gain match turns the
+  master down to the mix's loudness so you compare the sound and not the volume. Switch Gain
+  match off before you export.
+- Ten presets, and your own. Latency is fixed (about 5 ms) and reported to your DAW.
+
+The genre targets are our own reading of finished records and are meant as starting points.
+
 ## Install
 
 Download the zip for your system from the [latest release](https://github.com/GPTmadeit/persona/releases/latest).
+
+Both plugins live in the same files: after installing you'll find *Persona* and *Persona Master*
+in your DAW's plugin list.
 
 **Windows**: unzip, then copy `Persona.vst3` to `C:\Program Files\Common Files\VST3` and
 `Persona.clap` to `C:\Program Files\Common Files\CLAP`. Rescan plugins in your DAW. In FL Studio
@@ -123,6 +165,7 @@ cargo xtask bundle persona --release      # target/bundled/Persona.{vst3,clap}
 cargo test --release
 cargo run -p render --release -- target/bundled/Persona.clap   # Linux: every style through the real plugin
 cargo run --release --features standalone -- --backend dummy   # UI without a DAW
+PERSONA_DEMO=1 cargo run --release --features standalone -- master --backend dummy   # Persona Master with a test mix
 ```
 
 The styles' compressor thresholds and trims are calibrated against a test vocal. After changing

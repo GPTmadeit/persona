@@ -40,11 +40,14 @@ pub struct PersonaMaster {
     params: Arc<MasterParams>,
     shared: Arc<MasterShared>,
     chain: Option<MasterChain>,
+    /// A looping test mix that replaces the input in the standalone build (PERSONA_DEMO=1),
+    /// so the window can be seen working without a DAW.
+    demo: Option<((Vec<f32>, Vec<f32>), usize)>,
 }
 
 impl Default for PersonaMaster {
     fn default() -> Self {
-        Self { params: Arc::new(MasterParams::default()), shared: Arc::new(MasterShared::default()), chain: None }
+        Self { params: Arc::new(MasterParams::default()), shared: Arc::new(MasterShared::default()), chain: None, demo: None }
     }
 }
 
@@ -82,6 +85,10 @@ impl Plugin for PersonaMaster {
         context.set_latency_samples(chain.latency() as u32);
         self.shared.latency.store(chain.latency(), Ordering::Relaxed);
         self.chain = Some(chain);
+        #[cfg(feature = "standalone")]
+        if std::env::var("PERSONA_DEMO").is_ok() {
+            self.demo = Some((crate::testsignal::mix(fs, 8.0), 0));
+        }
         crate::update::cleanup_old_binaries();
         true
     }
@@ -101,6 +108,13 @@ impl Plugin for PersonaMaster {
         let (left, rest) = out.split_at_mut(1);
         let left = &mut left[0][..];
         let right = &mut rest[0][..];
+        if let Some(((dl, dr), at)) = self.demo.as_mut() {
+            for i in 0..n {
+                left[i] = dl[*at];
+                right[i] = dr[*at];
+                *at = (*at + 1) % dl.len();
+            }
+        }
         let mut pos = 0;
         while pos < n {
             let end = (pos + MAX_BLOCK).min(n);

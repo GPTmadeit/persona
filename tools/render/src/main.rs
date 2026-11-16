@@ -70,7 +70,7 @@ struct Plugin {
 }
 
 impl Plugin {
-    unsafe fn load(path: &Path) -> Self {
+    unsafe fn load(path: &Path, id: &str) -> Self {
         // On Linux a .clap is a plain shared object.
         let lib = libloading::Library::new(path).expect("load plugin");
         let entry: libloading::Symbol<*const clap_plugin_entry> = lib.get(b"clap_entry\0").expect("clap_entry");
@@ -79,8 +79,13 @@ impl Plugin {
         assert!((entry.init.unwrap())(cpath.as_ptr()));
         let factory = (entry.get_factory.unwrap())(CLAP_PLUGIN_FACTORY_ID.as_ptr()) as *const clap_plugin_factory;
         assert!(!factory.is_null());
-        assert_eq!((*factory).get_plugin_count.unwrap()(factory), 1);
-        let desc = (*factory).get_plugin_descriptor.unwrap()(factory, 0);
+        // One binary, two plugins: pick by id.
+        let count = (*factory).get_plugin_count.unwrap()(factory);
+        assert_eq!(count, 2, "expected Persona and Persona Master");
+        let desc = (0..count)
+            .map(|i| (*factory).get_plugin_descriptor.unwrap()(factory, i))
+            .find(|d| std::ffi::CStr::from_ptr((**d).id).to_str() == Ok(id))
+            .unwrap_or_else(|| panic!("no plugin {id}"));
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
             host_data: std::ptr::null_mut(),
@@ -128,6 +133,10 @@ impl Plugin {
 
     /// Processes `input` (mono, sent to both channels) with the transport running at `bpm`.
     unsafe fn render(&self, bpm: f64, input: &[f32]) -> (Vec<f32>, Vec<f32>) {
+        self.render_stereo(bpm, input, input)
+    }
+
+    unsafe fn render_stereo(&self, bpm: f64, input: &[f32], input_r: &[f32]) -> (Vec<f32>, Vec<f32>) {
         let p = self.plugin;
         (*p).reset.unwrap()(p);
         assert!((*p).start_processing.unwrap()(p));
@@ -141,7 +150,7 @@ impl Plugin {
         while pos < total {
             let n = BLOCK.min(total - pos);
             il[..n].copy_from_slice(&input[pos..pos + n]);
-            ir[..n].copy_from_slice(&input[pos..pos + n]);
+            ir[..n].copy_from_slice(&input_r[pos..pos + n]);
             let in_ev = clap_input_events { ctx: std::ptr::null_mut(), size: Some(ev_size), get: Some(ev_get) };
             let out_ev = clap_output_events { ctx: std::ptr::null_mut(), try_push: Some(out_push) };
             let beat_pos = pos as f64 / spb;
@@ -292,7 +301,7 @@ fn main() {
     println!("test vocal: {in_db:.1} dBFS RMS, peak {:.2}", peak(&input));
 
     unsafe {
-        let pl = Plugin::load(&plugin_path);
+        let pl = Plugin::load(&plugin_path, "com.gptmadeit.persona");
         let default = pl.save();
 
         // ---- every style
@@ -408,6 +417,67 @@ fn main() {
 
         (*pl.plugin).deactivate.unwrap()(pl.plugin);
         (*pl.plugin).destroy.unwrap()(pl.plugin);
+
+        // ================= Persona Master, through the same binary
+        let pm = Plugin::load(&plugin_path, "com.gptmadeit.persona-master");
+        let default = pm.save();
+        let (ml, mr) = persona::testsignal::mix(SR as f32, 8.0);
+        write_wav(&out_dir.join("_mix.wav"), &ml, &mr);
+        let lat = pm.latency() as usize;
+        println!("--- Persona Master: latency {lat} samples");
+        println!("{:<18} {:>7} {:>8} {:>8}", "preset", "peak", "rms dB", "gain dB");
+        let mix_db = rms_db(&ml).max(rms_db(&mr));
+        for preset in persona::master::presets::PRESETS {
+            pm.load_state(&patched(&default, preset.values));
+            let (l, r) = pm.render_stereo(120.0, &ml, &mr);
+            let pk = peak(&l).max(peak(&r));
+            let db = rms_db(&l).max(rms_db(&r));
+            let finite = l.iter().chain(&r).all(|v| v.is_finite());
+            // The ceiling is -1 dBFS (0.891) in every preset.
+            let ok = finite && pk <= 0.8914 && db > mix_db - 6.0 && pm.latency() as usize == lat;
+            println!("{:<18} {:>7.3} {:>8.1} {:>+8.1} {}", preset.name, pk, db, db - mix_db, if ok { "ok" } else { "FAIL" });
+            write_wav(&out_dir.join(format!("master_{}.wav", preset.name.replace([' ', '&'], "_"))), &l, &r);
+            if !ok {
+                failures.push(format!("master preset {}: finite={finite} peak={pk}", preset.name));
+            }
+        }
+        // Pushed hard, the sample peaks stay under the ceiling.
+        pm.load_state(&patched(&default, &[("max_gain", 15.0), ("max_clip", 0.5), ("mb_on", 1.0), ("exc_on", 1.0), ("exc_amt_4", 0.4)]));
+        let (l, r) = pm.render_stereo(120.0, &ml, &mr);
+        let pk = peak(&l).max(peak(&r));
+        println!("master pushed +15 dB: peak {pk:.4}, {:+.1} dB louder", rms_db(&l) - rms_db(&ml));
+        if pk > 0.8914 || rms_db(&l) - rms_db(&ml) < 6.0 {
+            failures.push(format!("master did not hold the ceiling or get loud: peak {pk}"));
+        }
+        // Bypass and "everything off" are both the input, delayed by the reported latency.
+        for (name, values) in [
+            ("bypass", vec![("bypass", 1.0), ("max_gain", 9.0)]),
+            ("all modules off", vec![("eq_mod", 0.0), ("glue_on", 0.0), ("mb_on", 0.0), ("exc_on", 0.0), ("img_on", 0.0), ("max_on", 0.0), ("bal_amt", 0.0)]),
+        ] {
+            pm.load_state(&patched(&default, &values));
+            let (l, r) = pm.render_stereo(120.0, &ml, &mr);
+            let err = (lat..ml.len()).map(|i| (l[i] - ml[i - lat]).abs().max((r[i] - mr[i - lat]).abs())).fold(0.0f32, f32::max);
+            println!("master {name}: dry error {err:.2e}");
+            if err > 1e-5 {
+                failures.push(format!("master {name} is not the delayed input"));
+            }
+        }
+        // State round trip.
+        let st = patched(&default, persona::master::presets::find("Trap Banger").unwrap().values);
+        pm.load_state(&st);
+        let back = pm.save();
+        let same = |a: &Value, b: &Value| match (a.get("f32"), b.get("f32")) {
+            (Some(x), Some(y)) => x.as_f64().map(|v| v as f32) == y.as_f64().map(|v| v as f32),
+            _ => a == b,
+        };
+        let bad: Vec<String> = st["params"].as_object().unwrap().iter().filter(|(k, v)| !same(&back["params"][k.as_str()], v)).map(|(k, _)| k.clone()).collect();
+        if bad.is_empty() {
+            println!("master state round-trip ok");
+        } else {
+            failures.push(format!("master state did not round-trip: {}", bad.join(", ")));
+        }
+        (*pm.plugin).deactivate.unwrap()(pm.plugin);
+        (*pm.plugin).destroy.unwrap()(pm.plugin);
     }
 
     if failures.is_empty() {
